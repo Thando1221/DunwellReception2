@@ -303,7 +303,7 @@ export default function EditAppointment() {
       FinalPrice: computedService.finalPrice || null,
       PaymentMethod: paymentMethod.toUpperCase(),
       IsStudent: isStudent,
-      Status: bookingRaw?.Status || "InPatient",
+      Status: bookingRaw?.Status || "OutPatient",
       MedicalAidNumber: paymentMethod === "medical-aid" ? medicalAidNumber : null,
       MedicalAidName:
         paymentMethod === "medical-aid"
