@@ -1,0 +1,6 @@
+{
+  "name": "Dunwell Clinic - Patient Management System",
+  "description": "Modern clinic management system for patient records, appointments, and healthcare administration",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

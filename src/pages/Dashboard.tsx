@@ -4,6 +4,7 @@ import { Users, Calendar, UserPlus, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import clinicLogo from "@/assets/clinic-logo.png";
+import { API_BASE } from "@/lib/config";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -17,8 +18,7 @@ const Dashboard = () => {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const API_URL = import.meta.env.VITE_API_URL;
-        const response = await fetch(`${API_URL}/dashboard/stats`, {
+        const response = await fetch(`${API_BASE}/dashboard/stats`, {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("token")}`,
           },
@@ -73,7 +73,7 @@ const Dashboard = () => {
       {/* HEADER */}
       <header className="flex justify-between items-center mb-10">
         <div>
-          <h1 classKey="text-4xl font-bold text-white">
+          <h1 className="text-4xl font-bold text-white">
             Dunwell Youth Priority Clinic
           </h1>
           <p className="text-gray-300 text-lg font-light mt-1">

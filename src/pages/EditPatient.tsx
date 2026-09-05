@@ -15,11 +15,11 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
+import { API_BASE } from "@/lib/config";
 
 const EditPatient = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const API_URL = import.meta.env.VITE_API_URL;
 
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
@@ -38,7 +38,7 @@ const EditPatient = () => {
   useEffect(() => {
     const fetchPatient = async () => {
       try {
-        const res = await axios.get(`${API_URL}/patients/${id}`);
+        const res = await axios.get(`${API_BASE}/patients/${id}`);
 
         setFormData({
           name: res.data.PatientName || "",
@@ -58,7 +58,7 @@ const EditPatient = () => {
     };
 
     fetchPatient();
-  }, [id]);
+  }, [id, navigate]);
 
   // 🔹 Update patient
   const handleSubmit = async (e: React.FormEvent) => {
@@ -72,7 +72,7 @@ const EditPatient = () => {
     try {
       setLoading(true);
 
-      await axios.put(`${API_URL}/patients/${id}`, {
+      await axios.put(`${API_BASE}/patients/${id}`, {
         PatientName: formData.name,
         PatientSurname: formData.surname,
         Patient_Email: formData.email,

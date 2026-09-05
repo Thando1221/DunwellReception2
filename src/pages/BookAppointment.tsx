@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { ArrowLeft, Search, Check, FileText, CheckCircle2, AlertCircle } from "lucide-react";
+import { ArrowLeft, Search, Check, FileText, CheckCircle2, AlertCircle, WifiOff, Building2 } from "lucide-react";
 import {
   Command,
   CommandEmpty,
@@ -30,15 +30,24 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import ConsentFormModal from "@/components/ConsentFormModal";
-
-const API_BASE = import.meta.env.VITE_API_URL;
+import { API_BASE } from "@/lib/config";
+import {
+  bookAppointmentWithOfflineSync,
+  getCachedPatients,
+  setCachedPatients,
+  getCachedNurses,
+  setCachedNurses,
+  isDeviceOnline,
+} from "@/lib/offlineSync";
+import { Badge } from "@/components/ui/badge";
 
 interface Patient {
-  PatientID: number;
+  PatientID: number | string;
   PatientName: string;
   PatientSurname: string;
   DOB?: string;
   Patient_ContactNo?: string;
+  _isOffline?: boolean;
 }
 
 interface Nurse {
@@ -56,35 +65,58 @@ const BookAppointment = () => {
   const [appointmentDate, setAppointmentDate] = useState("");
   const [appointmentTime, setAppointmentTime] = useState("");
 
-  const [patients, setPatients] = useState<Patient[]>([]);
-  const [nurses, setNurses] = useState<Nurse[]>([]);
+  const [patients, setPatients] = useState<Patient[]>(() => getCachedPatients());
+  const [nurses, setNurses] = useState<Nurse[]>(() => getCachedNurses());
   const [selectedNurse, setSelectedNurse] = useState<string>("");
 
   const [consentOpen, setConsentOpen] = useState(false);
   const [consentSignature, setConsentSignature] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+  const isOnline = isDeviceOnline();
 
   useEffect(() => {
     const fetchDropdowns = async () => {
       try {
-        const [patientsRes, nursesRes] = await Promise.all([
-          fetch(`${API_BASE}/patients`),
-          fetch(`${API_BASE}/nurses`),
-        ]);
-        if (!patientsRes.ok || !nursesRes.ok) throw new Error("Failed to fetch dropdowns");
-        setPatients(await patientsRes.json());
-        setNurses(await nursesRes.json());
+        if (isDeviceOnline()) {
+          const [patientsRes, nursesRes] = await Promise.all([
+            fetch(`${API_BASE}/patients`),
+            fetch(`${API_BASE}/nurses`),
+          ]);
+          if (patientsRes.ok && nursesRes.ok) {
+            const fetchedPatients = await patientsRes.json();
+            const fetchedNurses = await nursesRes.json();
+
+            // Merge with any cached offline patients that haven't synced yet
+            const cached = getCachedPatients();
+            const offlineOnly = cached.filter((p) => p._isOffline);
+            const mergedPatients = [...offlineOnly, ...fetchedPatients];
+
+            setPatients(mergedPatients);
+            setCachedPatients(mergedPatients);
+
+            setNurses(fetchedNurses);
+            setCachedNurses(fetchedNurses);
+            return;
+          }
+        }
       } catch (err) {
-        console.error("❌ Error fetching dropdown data:", err);
-        toast.error("Error loading dropdown data");
+        console.warn("⚠️ Error fetching dropdown data, using offline cache:", err);
       }
+
+      // Fallback
+      setPatients(getCachedPatients());
+      setNurses(getCachedNurses());
     };
+
     fetchDropdowns();
   }, []);
 
   const filteredPatients = useMemo(() => {
     if (!searchTerm) return patients;
     return patients.filter((p) =>
-      p.PatientSurname?.toLowerCase().includes(searchTerm.toLowerCase())
+      `${p.PatientName} ${p.PatientSurname}`
+        .toLowerCase()
+        .includes(searchTerm.toLowerCase())
     );
   }, [patients, searchTerm]);
 
@@ -106,39 +138,50 @@ const BookAppointment = () => {
     }
 
     try {
+      setSubmitting(true);
       const localStart = new Date(`${appointmentDate}T${appointmentTime}:00`);
 
+      const patName = selectedPatientData
+        ? `${selectedPatientData.PatientName} ${selectedPatientData.PatientSurname}`
+        : "Patient";
+
       const appointmentData = {
-        PatientID: parseInt(selectedPatient),
-        StartTime: localStart,
+        PatientID: selectedPatient.startsWith("offline-")
+          ? selectedPatient
+          : parseInt(selectedPatient, 10),
+        StartTime: localStart.toISOString(),
         EndTime: null,
-        UserID: parseInt(selectedNurse),
-        ServiceName: null,
+        UserID: parseInt(selectedNurse, 10),
+        ServiceName: "General Consultation",
         ServicePrice: null,
         PaymentMethod: null,
         IsStudent: false,
-        Status: "InPatient",
+        Status: "Scheduled",
+        Booking_Type: "Inclinic_Booking",
         MedicalAidNumber: null,
         MedicalAidName: null,
         MedicalAid_MainMember: null,
         MainMember__IDNo: null,
         MedicalAid_option: null,
         FinalPrice: null,
+        patientName: patName,
+        ConsentSignature: consentSignature,
       };
 
-      const res = await fetch(`${API_BASE}/appointments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(appointmentData),
-      });
+      const res = await bookAppointmentWithOfflineSync(appointmentData);
 
-      if (!res.ok) throw new Error("Failed to create appointment");
+      if (res.offline) {
+        toast.info(res.message, { duration: 5000 });
+      } else {
+        toast.success(res.message);
+      }
 
-      toast.success("Appointment booked successfully!");
       navigate("/bookings");
-    } catch (err) {
+    } catch (err: any) {
       console.error("❌ Error booking appointment:", err);
-      toast.error("Error booking appointment");
+      toast.error(err.message || "Error booking appointment");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -161,9 +204,17 @@ const BookAppointment = () => {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
-            <h1 className="text-4xl font-bold mb-2">Book Appointment</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-4xl font-bold mb-2">Book Appointment</h1>
+              {!isOnline && (
+                <Badge variant="outline" className="border-amber-500/60 text-amber-400 bg-amber-950/30 gap-1 mb-2">
+                  <WifiOff className="w-3 h-3" />
+                  Offline Mode
+                </Badge>
+              )}
+            </div>
             <p className="text-muted-foreground text-lg">
-              Schedule a new patient appointment
+              Schedule a new patient appointment {(!isOnline) && "(will sync automatically once connected)"}
             </p>
           </div>
         </div>
@@ -222,7 +273,17 @@ const BookAppointment = () => {
                                       : "opacity-0"
                                   )}
                                 />
-                                {p.PatientName} {p.PatientSurname}
+                                <span>
+                                  {p.PatientName} {p.PatientSurname}
+                                </span>
+                                {p._isOffline && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="ml-auto text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                                  >
+                                    Offline
+                                  </Badge>
+                                )}
                               </CommandItem>
                             ))}
                           </CommandGroup>
@@ -270,6 +331,23 @@ const BookAppointment = () => {
                       className="h-11"
                       data-testid="input-appointment-time"
                     />
+                  </div>
+                </div>
+
+                {/* Booking Type */}
+                <div className="space-y-2">
+                  <Label>Booking Type</Label>
+                  <div className="flex items-center gap-3 px-3.5 py-2.5 rounded-lg border bg-muted/20">
+                    <Building2 className="w-4 h-4 text-cyan-500 shrink-0" />
+                    <div className="flex-1 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">In-Clinic Booking</p>
+                        <p className="text-xs text-muted-foreground">Standard physical clinic appointment</p>
+                      </div>
+                      <Badge variant="outline" className="font-mono text-xs border-cyan-500/40 text-cyan-400 bg-cyan-950/30">
+                        Inclinic_Booking
+                      </Badge>
+                    </div>
                   </div>
                 </div>
 
@@ -323,15 +401,23 @@ const BookAppointment = () => {
                   <Button
                     type="submit"
                     className="flex-1 h-11"
+                    disabled={submitting}
                     data-testid="button-book-appointment"
                   >
-                    Book Appointment
+                    {submitting
+                      ? isOnline
+                        ? "Booking..."
+                        : "Saving Offline..."
+                      : isOnline
+                      ? "Book Appointment"
+                      : "Save Appointment (Offline)"}
                   </Button>
                   <Button
                     type="button"
                     variant="outline"
                     onClick={() => navigate("/dashboard")}
                     className="flex-1 h-11"
+                    disabled={submitting}
                   >
                     Cancel
                   </Button>

@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
 import {
   Card,
   CardContent,
@@ -14,14 +13,13 @@ import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { ArrowLeft } from "lucide-react";
-
-// ✅ API base URL from environment (works locally + on Render)
-const API_BASE = import.meta.env.VITE_API_URL;
+import { ArrowLeft, WifiOff } from "lucide-react";
+import { addPatientWithOfflineSync, isDeviceOnline } from "@/lib/offlineSync";
 
 const AddPatient = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const isOnline = isDeviceOnline();
 
   const [formData, setFormData] = useState({
     name: "",
@@ -73,17 +71,19 @@ const AddPatient = () => {
     try {
       setLoading(true);
 
-      const res = await axios.post(
-        `${API_BASE}/patients/add`,
-        formData
-      );
+      const result = await addPatientWithOfflineSync(formData);
 
-      toast.success(res.data?.message || "Patient added successfully!");
+      if (result.offline) {
+        toast.info(result.message, { duration: 5000 });
+      } else {
+        toast.success(result.message);
+      }
+
       navigate("/patients");
     } catch (error: any) {
       console.error("Add patient error:", error);
       toast.error(
-        error.response?.data?.message || "Failed to add patient"
+        error.response?.data?.message || error.message || "Failed to add patient"
       );
     } finally {
       setLoading(false);
@@ -238,7 +238,13 @@ const AddPatient = () => {
             {/* Actions */}
             <div className="flex gap-4 pt-4">
               <Button type="submit" disabled={loading} className="flex-1 h-11">
-                {loading ? "Adding..." : "Add Patient"}
+                {loading
+                  ? isOnline
+                    ? "Adding..."
+                    : "Saving Offline..."
+                  : isOnline
+                  ? "Add Patient"
+                  : "Save Patient (Offline)"}
               </Button>
 
               <Button

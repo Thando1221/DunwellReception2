@@ -17,14 +17,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Clock, LogIn, LogOut, RefreshCcw, Plane } from "lucide-react";
-
-/**
- * ✅ API BASE URL (Vite-safe)
- * Make sure .env has:
- * VITE_API_URL=http://localhost:5000
- * OR production backend URL
- */
-const API_BASE = import.meta.env.VITE_API_URL;
+import { API_BASE } from "@/lib/config";
 
 const Attendance = () => {
   const [employees, setEmployees] = useState<any[]>([]);

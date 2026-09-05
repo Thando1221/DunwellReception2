@@ -28,9 +28,14 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    const validPassword =
-      user.Password === password ||
-      (await bcrypt.compare(password, user.Password));
+    let validPassword = user.Password === password;
+    if (!validPassword && user.Password && (user.Password.startsWith("$2a$") || user.Password.startsWith("$2b$") || user.Password.startsWith("$2y$"))) {
+      try {
+        validPassword = await bcrypt.compare(password, user.Password);
+      } catch (err) {
+        validPassword = false;
+      }
+    }
 
     if (!validPassword) {
       return res.status(401).json({ message: "Invalid credentials" });
@@ -48,7 +53,7 @@ router.post("/login", async (req, res) => {
         role: user.UserRole?.trim(),
         name: user.Name,
       },
-      process.env.JWT_SECRET,
+      process.env.JWT_SECRET || "dunwell-reception-jwt-secret-key-2025",
       { expiresIn: "8h" }
     );
 

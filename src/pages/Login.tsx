@@ -13,6 +13,7 @@ import {
 import { Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import clinicLogo from "@/assets/clinic-logo.png"; // Rename your logo to this
+import { API_BASE } from "@/lib/config";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -24,31 +25,37 @@ const Login = () => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!username || !password) {
+    if (!username.trim() || !password.trim()) {
       toast.error("Please enter both username and password");
       return;
     }
 
     setIsLoading(true);
     try {
-      const API_URL = import.meta.env.VITE_API_URL;
-      const response = await fetch(`${API_URL}/auth/login`, {
+      const response = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: username.trim(), password }),
       });
 
-      const data = await response.json();
+      let data: any = {};
+      try {
+        data = await response.json();
+      } catch {
+        // Non-JSON response
+      }
+
       if (response.ok && data.token) {
         toast.success("Welcome to Dunwell Reception!");
         localStorage.setItem("token", data.token);
         localStorage.setItem("user", JSON.stringify(data.user));
         navigate("/dashboard");
       } else {
-        toast.error(data.message || "Invalid credentials");
+        toast.error(data.message || "Invalid credentials. Please check your username and password.");
       }
-    } catch {
-      toast.error("Network error. Please try again.");
+    } catch (err: any) {
+      console.error("Login request error:", err);
+      toast.error(err?.message || "Network error. Please try again.");
     } finally {
       setIsLoading(false);
     }

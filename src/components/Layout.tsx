@@ -4,6 +4,9 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Menu, X, Moon, Sun } from "lucide-react";
 import clsx from "clsx";
+import { SyncStatusBadge } from "@/components/SyncStatusBadge";
+import { PWAInstallButton } from "@/components/PWAInstallButton";
+import { OfflineBanner } from "@/components/OfflineBanner";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -42,6 +45,9 @@ const Layout = ({ children }: LayoutProps) => {
 
         {/* Main Content */}
         <main className="flex-1 flex flex-col overflow-hidden">
+          {/* Global Offline / Sync Banner */}
+          <OfflineBanner />
+
           {/* Header */}
           <header
             className={clsx(
@@ -50,7 +56,7 @@ const Layout = ({ children }: LayoutProps) => {
               darkMode ? "bg-[#13273D]/90 border-[#1E3A52]" : "bg-[#1F3B57]/95 border-[#274766]"
             )}
           >
-            <div className="flex h-16 items-center gap-4">
+            <div className="flex h-16 items-center gap-3 md:gap-4">
               {/* Mobile Sidebar Toggle */}
               <Button
                 variant="ghost"
@@ -67,6 +73,12 @@ const Layout = ({ children }: LayoutProps) => {
 
               <div className="flex-1" />
 
+              {/* Install PWA Button */}
+              <PWAInstallButton />
+
+              {/* Offline & Sync Indicator */}
+              <SyncStatusBadge />
+
               {/* Theme Toggle */}
               <Button
                 variant="ghost"
@@ -82,7 +94,7 @@ const Layout = ({ children }: LayoutProps) => {
               </Button>
 
               {/* User Info */}
-              <span className="text-sm font-medium">
+              <span className="text-sm font-medium hidden sm:inline-block">
                 Welcome, <span className="text-cyan-300">Admin</span>
               </span>
             </div>

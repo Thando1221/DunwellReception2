@@ -9,33 +9,70 @@ const router = express.Router();
  */
 router.get("/", async (req, res) => {
   try {
-    const result = await query(`
-      SELECT 
-        a.AppointID AS id,
-        p.PatientName + ' ' + p.PatientSurname AS patientName,
-        a.PatientID,
-        a.MedicalAidNumber,
-        a.StartTime,
-        a.EndTime,
-        a.UserID,
-        a.MedicalAidName,
-        a.Status,
-        a.ServiceName,
-        a.ServicePrice,
-        a.FinalPrice,
-        a.MedicalAid_MainMember,
-        a.MainMember__IDNo,
-        a.MedicalAid_option,
-        a.PaymentMethod,
-        a.IsStudent,
-        a.isFollow_Up,
-        u.Name + ' ' + u.Surname AS doctorName
-      FROM Appointments a
-      LEFT JOIN Patients p ON a.PatientID = p.PatientID
-      LEFT JOIN Users u ON a.UserID = u.UserID
-      WHERE CAST(a.StartTime AS DATE) = CAST(GETDATE() AS DATE)
-      ORDER BY a.StartTime ASC
-    `);
+    let result;
+    try {
+      result = await query(`
+        SELECT 
+          a.AppointID AS id,
+          p.PatientName + ' ' + p.PatientSurname AS patientName,
+          a.PatientID,
+          a.MedicalAidNumber,
+          a.StartTime,
+          a.EndTime,
+          a.UserID,
+          a.MedicalAidName,
+          a.Status,
+          ISNULL(a.Booking_Type, 'Inclinic_Booking') AS Booking_Type,
+          a.ServiceName,
+          a.ServicePrice,
+          a.FinalPrice,
+          a.MedicalAid_MainMember,
+          a.MainMember__IDNo,
+          a.MedicalAid_option,
+          a.PaymentMethod,
+          a.IsStudent,
+          a.isFollow_Up,
+          u.Name + ' ' + u.Surname AS doctorName
+        FROM Appointments a
+        LEFT JOIN Patients p ON a.PatientID = p.PatientID
+        LEFT JOIN Users u ON a.UserID = u.UserID
+        WHERE CAST(a.StartTime AS DATE) = CAST(GETDATE() AS DATE)
+        ORDER BY a.StartTime ASC
+      `);
+    } catch (err) {
+      if (err.message && err.message.includes("Booking_Type")) {
+        result = await query(`
+          SELECT 
+            a.AppointID AS id,
+            p.PatientName + ' ' + p.PatientSurname AS patientName,
+            a.PatientID,
+            a.MedicalAidNumber,
+            a.StartTime,
+            a.EndTime,
+            a.UserID,
+            a.MedicalAidName,
+            a.Status,
+            'Inclinic_Booking' AS Booking_Type,
+            a.ServiceName,
+            a.ServicePrice,
+            a.FinalPrice,
+            a.MedicalAid_MainMember,
+            a.MainMember__IDNo,
+            a.MedicalAid_option,
+            a.PaymentMethod,
+            a.IsStudent,
+            a.isFollow_Up,
+            u.Name + ' ' + u.Surname AS doctorName
+          FROM Appointments a
+          LEFT JOIN Patients p ON a.PatientID = p.PatientID
+          LEFT JOIN Users u ON a.UserID = u.UserID
+          WHERE CAST(a.StartTime AS DATE) = CAST(GETDATE() AS DATE)
+          ORDER BY a.StartTime ASC
+        `);
+      } else {
+        throw err;
+      }
+    }
 
     res.json(result);
   } catch (err) {
@@ -51,35 +88,74 @@ router.get("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
 
-    const result = await query(
-      `
-        SELECT 
-          a.AppointID AS id,
-          p.PatientName + ' ' + p.PatientSurname AS patientName,
-          a.PatientID,
-          a.MedicalAidNumber,
-          a.StartTime,
-          a.EndTime,
-          a.UserID,
-          a.MedicalAidName,
-          a.Status,
-          a.ServiceName,
-          a.ServicePrice,
-          a.FinalPrice,
-          a.MedicalAid_MainMember,
-          a.MainMember__IDNo,
-          a.MedicalAid_option,
-          a.PaymentMethod,
-          a.IsStudent,
-          a.isFollow_Up,
-          u.Name + ' ' + u.Surname AS doctorName
-        FROM Appointments a
-        LEFT JOIN Patients p ON a.PatientID = p.PatientID
-        LEFT JOIN Users u ON a.UserID = u.UserID
-        WHERE a.AppointID = @p0
-      `,
-      [id]
-    );
+    let result;
+    try {
+      result = await query(
+        `
+          SELECT 
+            a.AppointID AS id,
+            p.PatientName + ' ' + p.PatientSurname AS patientName,
+            a.PatientID,
+            a.MedicalAidNumber,
+            a.StartTime,
+            a.EndTime,
+            a.UserID,
+            a.MedicalAidName,
+            a.Status,
+            ISNULL(a.Booking_Type, 'Inclinic_Booking') AS Booking_Type,
+            a.ServiceName,
+            a.ServicePrice,
+            a.FinalPrice,
+            a.MedicalAid_MainMember,
+            a.MainMember__IDNo,
+            a.MedicalAid_option,
+            a.PaymentMethod,
+            a.IsStudent,
+            a.isFollow_Up,
+            u.Name + ' ' + u.Surname AS doctorName
+          FROM Appointments a
+          LEFT JOIN Patients p ON a.PatientID = p.PatientID
+          LEFT JOIN Users u ON a.UserID = u.UserID
+          WHERE a.AppointID = @p0
+        `,
+        [id]
+      );
+    } catch (err) {
+      if (err.message && err.message.includes("Booking_Type")) {
+        result = await query(
+          `
+            SELECT 
+              a.AppointID AS id,
+              p.PatientName + ' ' + p.PatientSurname AS patientName,
+              a.PatientID,
+              a.MedicalAidNumber,
+              a.StartTime,
+              a.EndTime,
+              a.UserID,
+              a.MedicalAidName,
+              a.Status,
+              'Inclinic_Booking' AS Booking_Type,
+              a.ServiceName,
+              a.ServicePrice,
+              a.FinalPrice,
+              a.MedicalAid_MainMember,
+              a.MainMember__IDNo,
+              a.MedicalAid_option,
+              a.PaymentMethod,
+              a.IsStudent,
+              a.isFollow_Up,
+              u.Name + ' ' + u.Surname AS doctorName
+            FROM Appointments a
+            LEFT JOIN Patients p ON a.PatientID = p.PatientID
+            LEFT JOIN Users u ON a.UserID = u.UserID
+            WHERE a.AppointID = @p0
+          `,
+          [id]
+        );
+      } else {
+        throw err;
+      }
+    }
 
     if (!result.length) return res.status(404).json({ message: "Booking not found" });
     res.json(result[0]);
@@ -107,6 +183,7 @@ router.put("/:id", async (req, res) => {
       "MedicalAid_option",
       "PaymentMethod",
       "Status",
+      "Booking_Type",
       "ServiceName",
       "ServicePrice",
       "FinalPrice",

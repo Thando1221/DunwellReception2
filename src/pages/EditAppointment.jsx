@@ -29,8 +29,7 @@ import {
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-
-const API_BASE = import.meta.env.VITE_API_URL;
+import { API_BASE } from "@/lib/config";
 
 // ── AddServiceRow — unified Auto + Manual service picker ──────────────────────
 function AddServiceRow({ services, addedServices, onAdd }) {
@@ -316,6 +315,7 @@ export default function EditAppointment() {
       MedicalAid_MainMember: paymentMethod === "medical-aid" ? medicalAidMainMember : null,
       MainMember__IDNo: paymentMethod === "medical-aid" ? mainMemberIdNo : null,
       MedicalAid_option: paymentMethod === "medical-aid" ? medicalAidOption : null,
+      Booking_Type: bookingRaw?.Booking_Type || "Inclinic_Booking",
       isFollow_Up: bookingRaw?.isFollow_Up ?? false,
     };
 
