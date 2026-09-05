@@ -17,8 +17,8 @@ const config = {
     min: 0,
     idleTimeoutMillis: 30000,
   },
-  connectionTimeout: 15000,
-  requestTimeout: 15000,
+  connectionTimeout: 2000,
+  requestTimeout: 2000,
 };
 
 // ==========================================
@@ -232,6 +232,57 @@ const mockData = {
       HoursWorked: null,
     },
   ],
+
+  payroll: [
+    {
+      PayrollID: 1,
+      FullName: "Sister Thandiwe Mokoena",
+      Bank: "CAPITEC",
+      Position: "Senior Professional Nurse",
+      AccountNumber: "1489201948",
+      Status: "Permanent",
+      Salary: 32500.0,
+      Month: new Date().getMonth() + 1,
+      Year: new Date().getFullYear(),
+      CreatedAt: new Date(),
+    },
+    {
+      PayrollID: 2,
+      FullName: "Nurse Nomvula Khumalo",
+      Bank: "FNB",
+      Position: "Staff Nurse",
+      AccountNumber: "62891048291",
+      Status: "Permanent",
+      Salary: 24000.0,
+      Month: new Date().getMonth() + 1,
+      Year: new Date().getFullYear(),
+      CreatedAt: new Date(),
+    },
+    {
+      PayrollID: 3,
+      FullName: "Dr. Sipho Dlamini",
+      Bank: "STANDARD BANK",
+      Position: "Consulting Physician",
+      AccountNumber: "002948194",
+      Status: "LOCUM",
+      Salary: 45000.0,
+      Month: new Date().getMonth() + 1,
+      Year: new Date().getFullYear(),
+      CreatedAt: new Date(),
+    },
+    {
+      PayrollID: 4,
+      FullName: "Kagiso Molefe",
+      Bank: "NEDBANK",
+      Position: "Receptionist / Clinic Admin",
+      AccountNumber: "1194019284",
+      Status: "Permanent",
+      Salary: 14500.0,
+      Month: new Date().getMonth() + 1,
+      Year: new Date().getFullYear(),
+      CreatedAt: new Date(),
+    },
+  ],
 };
 
 let nextPatientId = 5;
@@ -239,9 +290,14 @@ let nextAppointmentId = 4;
 let nextUserId = 6;
 let nextRegisterId = 2;
 let nextCatalogueId = 20;
+let nextPayrollId = 5;
 
 let pool = null;
-let useMock = !process.env.DB_SERVER;
+let useMock =
+  !process.env.DB_SERVER ||
+  !process.env.DB_SERVER.trim() ||
+  process.env.DB_SERVER.toLowerCase().includes("example") ||
+  process.env.DB_SERVER.toLowerCase().includes("your_server");
 
 // Helper to test if a date is today
 function isSameDate(d1, d2 = new Date()) {
@@ -416,11 +472,46 @@ function executeMockQuery(queryString, paramMap = {}) {
   }
 
   if (qUpper.startsWith("UPDATE APPOINTMENTS SET")) {
-    const id = paramMap[`p${Object.keys(paramMap).length - 1}`] ?? paramMap["id"] ?? paramMap["AppointID"];
+    const whereIdx = qUpper.indexOf("WHERE");
+    let id = null;
+    if (whereIdx !== -1) {
+      const whereClause = q.slice(whereIdx);
+      const idMatch = whereClause.match(/(?:AppointID|id)\s*=\s*(?:@(\w+)|\b(\d+)\b)/i);
+      if (idMatch) {
+        if (idMatch[1] && paramMap[idMatch[1]] !== undefined) {
+          id = paramMap[idMatch[1]];
+        } else if (idMatch[2]) {
+          id = idMatch[2];
+        }
+      }
+    }
+    if (!id) {
+      id = paramMap[`p${Object.keys(paramMap).length - 1}`] ?? paramMap["id"] ?? paramMap["AppointID"];
+    }
+
     const appt = mockData.appointments.find((a) => String(a.AppointID) === String(id));
     if (appt) {
+      if (whereIdx !== -1) {
+        const setPart = q.slice(qUpper.indexOf("SET") + 3, whereIdx);
+        const assignments = setPart.split(",");
+        for (const assign of assignments) {
+          const parts = assign.split("=");
+          if (parts.length === 2) {
+            const rawCol = parts[0].trim().replace(/[\[\]]/g, "");
+            const rawVal = parts[1].trim();
+            if (rawVal.startsWith("@")) {
+              const pKey = rawVal.substring(1);
+              if (paramMap[pKey] !== undefined) {
+                appt[rawCol] = paramMap[pKey];
+              }
+            } else {
+              appt[rawCol] = rawVal.replace(/^'|'$/g, "");
+            }
+          }
+        }
+      }
       Object.entries(paramMap).forEach(([k, v]) => {
-        if (k in appt && k !== "AppointID") {
+        if (!k.startsWith("p") && k !== "AppointID" && k !== "id") {
           appt[k] = v;
         }
       });
@@ -429,7 +520,22 @@ function executeMockQuery(queryString, paramMap = {}) {
   }
 
   if (qUpper.startsWith("DELETE FROM APPOINTMENTS")) {
-    const id = paramMap["p0"] ?? paramMap["id"] ?? paramMap["AppointID"];
+    const whereIdx = qUpper.indexOf("WHERE");
+    let id = null;
+    if (whereIdx !== -1) {
+      const whereClause = q.slice(whereIdx);
+      const idMatch = whereClause.match(/(?:AppointID|id)\s*=\s*(?:@(\w+)|\b(\d+)\b)/i);
+      if (idMatch) {
+        if (idMatch[1] && paramMap[idMatch[1]] !== undefined) {
+          id = paramMap[idMatch[1]];
+        } else if (idMatch[2]) {
+          id = idMatch[2];
+        }
+      }
+    }
+    if (!id) {
+      id = paramMap["p0"] ?? paramMap["id"] ?? paramMap["AppointID"] ?? Object.values(paramMap)[0];
+    }
     const idx = mockData.appointments.findIndex((a) => String(a.AppointID) === String(id));
     if (idx !== -1) mockData.appointments.splice(idx, 1);
     return [];
@@ -481,7 +587,13 @@ function executeMockQuery(queryString, paramMap = {}) {
         MedicalAid_option: a.MedicalAid_option || "",
         PaymentMethod: a.PaymentMethod || "Cash",
         IsStudent: Boolean(a.IsStudent),
-        isFollow_Up: a.isFollow_Up ? "Yes" : "No",
+        isFollow_Up: Boolean(
+          a.isFollow_Up === true ||
+          a.isFollow_Up === 1 ||
+          a.isFollow_Up === "1" ||
+          String(a.isFollow_Up).toLowerCase() === "true" ||
+          a.isFollow_Up === "Yes"
+        ),
         doctorName: `${u.Name || ""} ${u.Surname || ""}`.trim() || "Doctor/Nurse",
         UserName: u.Name || "",
         UserSurname: u.Surname || "",
@@ -556,6 +668,70 @@ function executeMockQuery(queryString, paramMap = {}) {
       reg.HoursWorked = 8;
     }
     return [];
+  }
+
+  // 6. PAYROLL QUERIES
+  if (qUpper.startsWith("INSERT INTO PAYROLL")) {
+    const newItem = {
+      PayrollID: nextPayrollId++,
+      FullName: paramMap["FullName"] || paramMap["p0"] || "Staff Member",
+      Bank: paramMap["Bank"] || paramMap["p1"] || "CAPITEC",
+      Position: paramMap["Position"] || paramMap["p2"] || "Nurse",
+      AccountNumber: paramMap["AccountNumber"] || paramMap["p3"] || "1000000000",
+      Status: paramMap["Status"] || paramMap["p4"] || "Permanent",
+      Salary: parseFloat(paramMap["Salary"] || paramMap["p5"] || 0),
+      Month: parseInt(paramMap["Month"] || paramMap["p6"] || new Date().getMonth() + 1),
+      Year: parseInt(paramMap["Year"] || paramMap["p7"] || new Date().getFullYear()),
+      CreatedAt: new Date(),
+    };
+    mockData.payroll.push(newItem);
+    return [newItem];
+  }
+
+  if (qUpper.startsWith("UPDATE PAYROLL")) {
+    const id = paramMap["id"] ?? paramMap["p6"];
+    const item = mockData.payroll.find((p) => String(p.PayrollID) === String(id));
+    if (item) {
+      if (paramMap["FullName"] !== undefined) item.FullName = paramMap["FullName"];
+      if (paramMap["Bank"] !== undefined) item.Bank = paramMap["Bank"];
+      if (paramMap["Position"] !== undefined) item.Position = paramMap["Position"];
+      if (paramMap["AccountNumber"] !== undefined) item.AccountNumber = paramMap["AccountNumber"];
+      if (paramMap["Status"] !== undefined) item.Status = paramMap["Status"];
+      if (paramMap["Salary"] !== undefined) item.Salary = parseFloat(paramMap["Salary"]);
+      return [item];
+    }
+    return [];
+  }
+
+  if (qUpper.startsWith("DELETE FROM PAYROLL")) {
+    const id = paramMap["id"] ?? paramMap["p0"];
+    const idx = mockData.payroll.findIndex((p) => String(p.PayrollID) === String(id));
+    if (idx !== -1) mockData.payroll.splice(idx, 1);
+    return [];
+  }
+
+  if (qUpper.includes("FROM PAYROLL")) {
+    let list = [...mockData.payroll];
+    const month = paramMap["month"];
+    const year = paramMap["year"];
+    if (month && year) {
+      list = list.filter((p) => p.Month === parseInt(month) && p.Year === parseInt(year));
+    }
+    return list;
+  }
+
+  // 7. REGISTER QUERIES
+  if (qUpper.includes("FROM REGISTER")) {
+    return mockData.register.map((r) => ({
+      RegisterID: r.RegisterID,
+      UserID: r.UserID,
+      Date: r.Date,
+      TimeIn: r.TimeIn,
+      TimeOut: r.TimeOut,
+      OnLeave: r.OnLeave,
+      remark_OnArrival: r.remark_OnArrival,
+      HoursWorked: r.HoursWorked || 8,
+    }));
   }
 
   return [];

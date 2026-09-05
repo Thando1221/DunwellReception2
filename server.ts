@@ -14,6 +14,9 @@ import appointmentRoutes from "./backend/routes/appointments.js";
 import bookingsRoute from "./backend/routes/bookings.js";
 import usersRoutes from "./backend/routes/users.js";
 import attendanceRoutes from "./backend/routes/attendance.js";
+import financialRouter from "./backend/routes/financial.js";
+import payrollRouter from "./backend/routes/payroll.js";
+import registerRouter from "./backend/routes/register.js";
 
 dotenv.config();
 
@@ -37,6 +40,9 @@ async function startServer() {
   app.use("/api/bookings", bookingsRoute);
   app.use("/api/users", usersRoutes);
   app.use("/api/attendance", attendanceRoutes);
+  app.use("/api/financial", financialRouter);
+  app.use("/api/payroll", payrollRouter);
+  app.use("/api/register", registerRouter);
 
   // Health check
   app.get("/api/health", (_req, res) => {
@@ -53,7 +59,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (_req, res) => {
+    app.use((_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

@@ -12,7 +12,8 @@ router.use((req, res, next) => {
 // ✅ GET All Patients
 router.get("/", async (req, res) => {
   try {
-    const patients = await query(`
+    const { startDate, endDate } = req.query;
+    let sqlStr = `
       SELECT 
         PatientID,
         PatientName,
@@ -21,10 +22,20 @@ router.get("/", async (req, res) => {
         Patient_Email,
         DOB,
         Address,
-        Gender
+        Gender,
+        CreatedDate
       FROM Patients
-      ORDER BY PatientID DESC
-    `);
+    `;
+    const params = [];
+
+    if (startDate && endDate) {
+      sqlStr += ` WHERE CreatedDate BETWEEN @p0 AND @p1`;
+      params.push(startDate, endDate);
+    }
+
+    sqlStr += ` ORDER BY PatientID DESC`;
+
+    const patients = await query(sqlStr, params);
 
     res.status(200).json(patients);
   } catch (error) {

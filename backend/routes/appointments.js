@@ -230,6 +230,77 @@ router.get("/latest-medical-aid/:patientId", async (req, res) => {
   }
 });
 
+/**
+ * ===============================
+ * GET all appointments (with optional date range)
+ * ===============================
+ */
+router.get("/", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const pool = await getPool();
+    const request = pool.request();
+
+    let queryStr = `
+      SELECT 
+        a.AppointID,
+        a.PatientID,
+        p.PatientName,
+        p.PatientSurname,
+        a.MedicalAidNumber,
+        a.StartTime,
+        a.EndTime,
+        a.UserID,
+        a.MedicalAidName,
+        a.Status,
+        a.ServiceName,
+        a.ServicePrice,
+        a.FinalPrice,
+        a.MedicalAid_MainMember,
+        a.MainMember__IDNo,
+        a.MedicalAid_option,
+        a.PaymentMethod,
+        a.IsStudent,
+        a.isFollow_Up,
+        u.Name AS UserName,
+        u.Surname AS UserSurname
+      FROM Appointments a
+      LEFT JOIN Patients p ON a.PatientID = p.PatientID
+      LEFT JOIN Users u ON a.UserID = u.UserID
+      WHERE 1=1
+    `;
+
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      queryStr += ` AND a.StartTime BETWEEN @startDate AND @endDate`;
+      request.input("startDate", sql.DateTime, start);
+      request.input("endDate", sql.DateTime, end);
+    }
+
+    queryStr += ` ORDER BY a.StartTime DESC`;
+
+    const result = await request.query(queryStr);
+    const records = (result.recordset || []).map((app) => ({
+      ...app,
+      isFollow_Up:
+        typeof app.isFollow_Up === "boolean"
+          ? app.isFollow_Up
+          : String(app.isFollow_Up) === "1" || String(app.isFollow_Up).toLowerCase() === "true",
+      IsStudent:
+        typeof app.IsStudent === "boolean"
+          ? app.IsStudent
+          : String(app.IsStudent) === "1" || String(app.IsStudent).toLowerCase() === "true",
+    }));
+
+    res.json(records);
+  } catch (err) {
+    console.error("❌ Error fetching appointments:", err);
+    res.status(500).json({ message: "Server error fetching appointments", error: err.message });
+  }
+});
+
 
 /**
  * ===============================

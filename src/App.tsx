@@ -22,6 +22,7 @@ import BookAppointment from "./pages/BookAppointment";
 import EditAppointment from "./pages/EditAppointment";
 import Bookings from "./pages/Bookings";
 import Attendance from "./pages/Attendance";
+import Reports from "./pages/Reports";
 
 const queryClient = new QueryClient();
 
@@ -107,6 +108,16 @@ const App = () => {
               element={
                 <Layout>
                   <Attendance />
+                </Layout>
+              }
+            />
+
+            {/* 📊 Reports */}
+            <Route
+              path="/reports"
+              element={
+                <Layout>
+                  <Reports />
                 </Layout>
               }
             />

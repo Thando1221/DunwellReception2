@@ -19,6 +19,7 @@ import {
   UserPlus,
   Stethoscope,
   LogOut,
+  BarChart3,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ const menuItems = [
   { title: "Book Appointment", url: "/appointments/book", icon: Calendar },
   { title: "All Bookings", url: "/bookings", icon: CalendarCheck },
   { title: "Attendance", url: "/attendance", icon: Clock },
+  { title: "Reports", url: "/reports", icon: BarChart3 },
 ];
 
 export function AppSidebar() {

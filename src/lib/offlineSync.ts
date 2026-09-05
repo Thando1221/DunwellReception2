@@ -35,7 +35,7 @@ export interface QueuedAppointmentData {
 
 export interface QueueItem {
   id: string; // unique UUID or timestamp
-  type: "ADD_PATIENT" | "ADD_APPOINTMENT";
+  type: "ADD_PATIENT" | "ADD_APPOINTMENT" | "EDIT_APPOINTMENT" | "EDIT_PATIENT";
   tempId?: string; // temporary ID used for linking
   data: any;
   createdAt: number;
@@ -104,7 +104,21 @@ export function setCachedBookings(bookings: any[]): void {
 }
 
 export function getCachedCatalogue(): any[] {
-  return getStorage<any[]>(STORAGE_KEY_CATALOGUE, []);
+  const catalogue = getStorage<any[]>(STORAGE_KEY_CATALOGUE, []);
+  if (catalogue.length === 0) {
+    const defaultCatalogue = [
+      { CatalougeID: 1, Name: "General Consultation", Price: 350, discount: 50 },
+      { CatalougeID: 2, Name: "Follow-up Consultation", Price: 250, discount: 50 },
+      { CatalougeID: 3, Name: "Family Planning", Price: 180, discount: 30 },
+      { CatalougeID: 4, Name: "HIV Screening & Counselling", Price: 0, discount: 0 },
+      { CatalougeID: 5, Name: "Immunisation / Vaccine", Price: 220, discount: 40 },
+      { CatalougeID: 6, Name: "Blood Pressure & Vitals", Price: 120, discount: 20 },
+      { CatalougeID: 7, Name: "Minor Wound Dressing", Price: 280, discount: 40 },
+    ];
+    setStorage(STORAGE_KEY_CATALOGUE, defaultCatalogue);
+    return defaultCatalogue;
+  }
+  return catalogue;
 }
 
 export function setCachedCatalogue(catalogue: any[]): void {
@@ -112,7 +126,18 @@ export function setCachedCatalogue(catalogue: any[]): void {
 }
 
 export function getCachedNurses(): any[] {
-  return getStorage<any[]>(STORAGE_KEY_NURSES, []);
+  const nurses = getStorage<any[]>(STORAGE_KEY_NURSES, []);
+  if (nurses.length === 0) {
+    const defaultNurses = [
+      { UserID: 1, Name: "Sister", Surname: "Dlamini" },
+      { UserID: 2, Name: "Nurse", Surname: "Moyo" },
+      { UserID: 3, Name: "Dr.", Surname: "Khumalo" },
+      { UserID: 4, Name: "Nurse", Surname: "Sibanda" },
+    ];
+    setStorage(STORAGE_KEY_NURSES, defaultNurses);
+    return defaultNurses;
+  }
+  return nurses;
 }
 
 export function setCachedNurses(nurses: any[]): void {
@@ -276,6 +301,189 @@ export async function bookAppointmentWithOfflineSync(appointmentData: QueuedAppo
 }
 
 // ---------------------------------------------
+// Update Booking (Online or Queued Offline)
+// ---------------------------------------------
+export async function updateAppointmentWithOfflineSync(
+  appointmentId: string | number,
+  payload: any
+): Promise<{ success: boolean; offline: boolean; message: string }> {
+  const online = isDeviceOnline();
+
+  if (online) {
+    try {
+      const res = await fetch(`${API_BASE}/bookings/${appointmentId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `Failed to update appointment (${res.status})`);
+      }
+
+      // Update cached bookings with the latest values
+      const existing = getCachedBookings();
+      const updated = existing.map((b) => {
+        if (String(b.id) === String(appointmentId) || String(b.AppointID) === String(appointmentId)) {
+          return { ...b, ...payload, id: b.id, AppointID: b.AppointID };
+        }
+        return b;
+      });
+      setCachedBookings(updated);
+      refreshBookingsCache().catch(() => {});
+
+      return { success: true, offline: false, message: "Appointment updated successfully!" };
+    } catch (err: any) {
+      if (err.message === "Failed to fetch" || err.message?.includes("NetworkError") || !isDeviceOnline()) {
+        console.warn("Network error encountered during booking update. Saving update offline.");
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  // Save Offline
+  // 1. Update local cache immediately
+  const existingBookings = getCachedBookings();
+  const updatedBookings = existingBookings.map((b) => {
+    if (String(b.id) === String(appointmentId) || String(b.AppointID) === String(appointmentId)) {
+      return {
+        ...b,
+        ...payload,
+        id: b.id,
+        AppointID: b.AppointID,
+        _isOfflineEdited: true,
+      };
+    }
+    return b;
+  });
+  setCachedBookings(updatedBookings);
+
+  // 2. Check if this booking is already in the offline queue (as ADD_APPOINTMENT)
+  const queue = getOfflineQueue();
+  const existingQueueIndex = queue.findIndex(
+    (q) => q.type === "ADD_APPOINTMENT" && String(q.tempId) === String(appointmentId)
+  );
+
+  if (existingQueueIndex >= 0) {
+    // Merge into the existing creation queue item
+    queue[existingQueueIndex].data = {
+      ...queue[existingQueueIndex].data,
+      ...payload,
+    };
+  } else {
+    // Check if an EDIT_APPOINTMENT already exists for this appointmentId
+    const existingEditIndex = queue.findIndex(
+      (q) => q.type === "EDIT_APPOINTMENT" && String(q.tempId) === String(appointmentId)
+    );
+    if (existingEditIndex >= 0) {
+      queue[existingEditIndex].data = {
+        appointmentId,
+        payload: { ...queue[existingEditIndex].data.payload, ...payload },
+      };
+    } else {
+      // Add new edit task to queue
+      queue.push({
+        id: `queue-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        type: "EDIT_APPOINTMENT",
+        tempId: String(appointmentId),
+        data: { appointmentId, payload },
+        createdAt: Date.now(),
+        retryCount: 0,
+      });
+    }
+  }
+
+  saveOfflineQueue(queue);
+  window.dispatchEvent(new CustomEvent("dunwell_data_updated", { detail: { type: "BOOKING_EDITED_OFFLINE", appointmentId } }));
+
+  return {
+    success: true,
+    offline: true,
+    message: "Offline: Booking changes saved locally on device. Will automatically sync to database once online!",
+  };
+}
+
+// ---------------------------------------------
+// Update Patient (Online or Queued Offline)
+// ---------------------------------------------
+export async function updatePatientWithOfflineSync(
+  patientId: string | number,
+  payload: any
+): Promise<{ success: boolean; offline: boolean; message: string }> {
+  const online = isDeviceOnline();
+
+  if (online) {
+    try {
+      await axios.put(`${API_BASE}/patients/${patientId}`, payload);
+      const cached = getCachedPatients();
+      const updated = cached.map((p) => {
+        if (String(p.PatientID) === String(patientId)) {
+          return { ...p, ...payload };
+        }
+        return p;
+      });
+      setCachedPatients(updated);
+      refreshPatientsCache().catch(() => {});
+      return { success: true, offline: false, message: "Patient updated successfully!" };
+    } catch (err: any) {
+      if (!err.response || err.code === "ERR_NETWORK" || err.message?.includes("Network Error")) {
+        console.warn("Network error during patient update. Saving offline.");
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  // Save Offline
+  const cached = getCachedPatients();
+  const updated = cached.map((p) => {
+    if (String(p.PatientID) === String(patientId)) {
+      return { ...p, ...payload, _isOfflineEdited: true };
+    }
+    return p;
+  });
+  setCachedPatients(updated);
+
+  const queue = getOfflineQueue();
+  const existingQueueIndex = queue.findIndex(
+    (q) => q.type === "ADD_PATIENT" && String(q.tempId) === String(patientId)
+  );
+
+  if (existingQueueIndex >= 0) {
+    queue[existingQueueIndex].data = {
+      ...queue[existingQueueIndex].data,
+      name: payload.PatientName || queue[existingQueueIndex].data.name,
+      surname: payload.PatientSurname || queue[existingQueueIndex].data.surname,
+      email: payload.Patient_Email || queue[existingQueueIndex].data.email,
+      phone: payload.Patient_ContactNo || queue[existingQueueIndex].data.phone,
+      dob: payload.DOB || queue[existingQueueIndex].data.dob,
+      gender: payload.Gender || queue[existingQueueIndex].data.gender,
+      address: payload.Address || queue[existingQueueIndex].data.address,
+    };
+  } else {
+    queue.push({
+      id: `queue-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      type: "EDIT_PATIENT",
+      tempId: String(patientId),
+      data: { patientId, payload },
+      createdAt: Date.now(),
+      retryCount: 0,
+    });
+  }
+
+  saveOfflineQueue(queue);
+  window.dispatchEvent(new CustomEvent("dunwell_data_updated", { detail: { type: "PATIENT_EDITED_OFFLINE", patientId } }));
+
+  return {
+    success: true,
+    offline: true,
+    message: "Offline: Patient updated locally. Will sync to database once online!",
+  };
+}
+
+// ---------------------------------------------
 // Background Cache Refreshers
 // ---------------------------------------------
 export async function refreshPatientsCache(): Promise<any[]> {
@@ -419,6 +627,35 @@ export async function syncPendingQueue(): Promise<{ syncedCount: number; errors:
         item.retryCount = (item.retryCount || 0) + 1;
         remainingQueue.push(item);
       }
+    } else if (item.type === "EDIT_APPOINTMENT") {
+      try {
+        const res = await fetch(`${API_BASE}/bookings/${item.data.appointmentId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(item.data.payload),
+        });
+
+        if (!res.ok) {
+          throw new Error(`Appointment edit responded with status ${res.status}`);
+        }
+
+        syncedCount++;
+      } catch (err) {
+        console.error("Failed to sync edit appointment item:", item, err);
+        errorCount++;
+        item.retryCount = (item.retryCount || 0) + 1;
+        remainingQueue.push(item);
+      }
+    } else if (item.type === "EDIT_PATIENT") {
+      try {
+        await axios.put(`${API_BASE}/patients/${item.data.patientId}`, item.data.payload, { timeout: 10000 });
+        syncedCount++;
+      } catch (err) {
+        console.error("Failed to sync edit patient item:", item, err);
+        errorCount++;
+        item.retryCount = (item.retryCount || 0) + 1;
+        remainingQueue.push(item);
+      }
     } else {
       remainingQueue.push(item);
     }
@@ -451,35 +688,54 @@ export async function syncPendingQueue(): Promise<{ syncedCount: number; errors:
 // ---------------------------------------------
 let syncListenersInitialized = false;
 
+export function checkAndSyncImmediately(): void {
+  if (isDeviceOnline() && getPendingQueueCount() > 0 && !isSyncing) {
+    syncPendingQueue();
+  }
+}
+
 export function initOfflineSyncEngine(): void {
   if (typeof window === "undefined" || syncListenersInitialized) return;
   syncListenersInitialized = true;
 
-  // Sync immediately when browser reports online
+  // Sync immediately when browser reports online or data connection restored
   window.addEventListener("online", () => {
-    console.log("🌐 Network connection restored. Triggering offline sync...");
-    toast.info("Internet connection restored! Syncing offline records...");
+    console.log("🌐 Network connection restored. Triggering offline sync immediately...");
+    toast.info("Internet connection restored! Syncing offline records to database...");
     setTimeout(() => {
       syncPendingQueue();
-    }, 1200);
+    }, 800);
   });
 
   window.addEventListener("offline", () => {
-    console.log("⚠️ Device went offline. Queue active.");
-    toast.warning("You are currently offline. New patients and bookings will be saved locally and synced once reconnected.");
+    console.log("⚠️ Device went offline. Local offline storage active.");
+    toast.warning("You are currently offline. New patients, new bookings, and booking edits will be saved on your device and sent immediately when online.");
   });
 
-  // Periodic poll every 20 seconds to sync if online and items are waiting
+  // When user returns to tab or window regains focus, check and sync immediately
+  window.addEventListener("focus", () => {
+    if (isDeviceOnline() && getPendingQueueCount() > 0) {
+      syncPendingQueue();
+    }
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && isDeviceOnline() && getPendingQueueCount() > 0) {
+      syncPendingQueue();
+    }
+  });
+
+  // Continuous background check every 8 seconds to send pending items immediately if online
   setInterval(() => {
     if (isDeviceOnline() && getPendingQueueCount() > 0 && !isSyncing) {
       syncPendingQueue();
     }
-  }, 20000);
+  }, 8000);
 
-  // Initial sync check on startup
+  // Initial sync check on app startup
   if (isDeviceOnline() && getPendingQueueCount() > 0) {
     setTimeout(() => {
       syncPendingQueue();
-    }, 3000);
+    }, 1500);
   }
 }

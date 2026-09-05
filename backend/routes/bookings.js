@@ -3,6 +3,20 @@ import { query } from "../db.js";
 
 const router = express.Router();
 
+const formatBooking = (b) => {
+  if (!b) return b;
+  return {
+    ...b,
+    isFollow_Up: Boolean(
+      b.isFollow_Up === true ||
+      b.isFollow_Up === 1 ||
+      b.isFollow_Up === "1" ||
+      String(b.isFollow_Up).toLowerCase() === "true" ||
+      b.isFollow_Up === "Yes"
+    ),
+  };
+};
+
 /**
  * GET /api/bookings
  * Fetch today's appointments (joined patient & doctor)
@@ -74,7 +88,7 @@ router.get("/", async (req, res) => {
       }
     }
 
-    res.json(result);
+    res.json((result || []).map(formatBooking));
   } catch (err) {
     console.error("❌ Error fetching bookings:", err);
     res.status(500).json({ message: "Server error while fetching today's bookings", error: err.message });
@@ -158,7 +172,7 @@ router.get("/:id", async (req, res) => {
     }
 
     if (!result.length) return res.status(404).json({ message: "Booking not found" });
-    res.json(result[0]);
+    res.json(formatBooking(result[0]));
   } catch (err) {
     console.error("❌ Error fetching booking by id:", err);
     res.status(500).json({ message: "Server error fetching booking", error: err.message });
@@ -250,7 +264,7 @@ router.put("/:id", async (req, res) => {
       [id]
     );
 
-    res.json({ message: "Booking updated successfully", booking: updated[0] });
+    res.json({ message: "Booking updated successfully", booking: formatBooking(updated[0]) });
   } catch (err) {
     console.error("❌ Update booking error:", err);
     res.status(500).json({ message: "Failed to update booking", error: err.message });

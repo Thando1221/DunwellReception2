@@ -19,10 +19,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { RefreshCw, WifiOff, Clock, Plus } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { RefreshCw, WifiOff, Clock, Plus, Building2, Trash2, Edit } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { API_BASE } from "@/lib/config";
+import { cn } from "@/lib/utils";
 import {
   getCachedBookings,
   setCachedBookings,
@@ -38,7 +47,7 @@ interface Booking {
   StartTime: string | null;
   EndTime: string | null;
   Status: string | null;
-  isFollow_Up: string | null;
+  isFollow_Up?: boolean | string | number | null;
   UserID?: number | null;
   _isOffline?: boolean;
 }
@@ -48,6 +57,7 @@ export default function Bookings() {
   const [loading, setLoading] = useState(bookings.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | string | null>(null);
+  const [bookingToDelete, setBookingToDelete] = useState<Booking | null>(null);
   const [isOfflineMode, setIsOfflineMode] = useState(!isDeviceOnline());
   const navigate = useNavigate();
 
@@ -61,13 +71,13 @@ export default function Bookings() {
     );
 
     try {
-      setLoading(true);
+      if (bookings.length === 0) setLoading(true);
       setError(null);
 
       if (isDeviceOnline()) {
         const res = await axios.get<Booking[]>(
           `${API_BASE}/bookings`,
-          { timeout: 7000 }
+          { timeout: 3500 }
         );
 
         if (Array.isArray(res.data)) {
@@ -132,37 +142,43 @@ export default function Bookings() {
   // =====================
   // DELETE BOOKING
   // =====================
-  const deleteBooking = async (id: number | string) => {
+  const confirmDeleteBooking = async () => {
+    if (!bookingToDelete) return;
+    const target = bookingToDelete;
+    const id = target.id;
+
+    // 1. If offline item, delete from cache directly
     if (typeof id === "string" && id.startsWith("offline-")) {
       const updated = bookings.filter((b) => b.id !== id);
       setBookings(updated);
       setCachedBookings(updated);
+      setBookingToDelete(null);
       toast.success("Offline booking removed from device");
       return;
     }
 
-    if (!isDeviceOnline()) {
-      toast.error("Deleting existing database bookings requires an internet connection.");
-      return;
-    }
-
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this booking?"
-    );
-    if (!confirmed) return;
-
     try {
       setDeletingId(id);
+      setBookingToDelete(null);
 
-      await axios.delete(
-        `${API_BASE}/appointments/${id}`
-      );
+      // Optimistic delete for instantaneous response
+      const updated = bookings.filter((b) => String(b.id) !== String(id));
+      setBookings(updated);
+      setCachedBookings(updated);
+
+      try {
+        await axios.delete(`${API_BASE}/bookings/${id}`, { timeout: 3500 });
+      } catch (firstErr) {
+        // Fallback to /appointments/:id
+        await axios.delete(`${API_BASE}/appointments/${id}`, { timeout: 3500 });
+      }
 
       toast.success("Booking deleted successfully");
-      fetchBookings();
+      window.dispatchEvent(new CustomEvent("dunwell_data_updated"));
     } catch (err) {
       console.error("❌ Error deleting booking:", err);
       toast.error("Failed to delete booking.");
+      fetchBookings();
     } finally {
       setDeletingId(null);
     }
@@ -258,10 +274,15 @@ export default function Bookings() {
                     </TableCell>
                     <TableCell>
                       <Badge
-                        variant="outline"
-                        className="font-mono text-xs border-cyan-500/40 text-cyan-300 bg-cyan-950/20 whitespace-nowrap"
+                        className={cn(
+                          "font-semibold text-xs px-2.5 py-1 rounded-md shadow-xs whitespace-nowrap border inline-flex items-center gap-1.5",
+                          b.Booking_Type?.toLowerCase().includes("online") || b.Booking_Type?.toLowerCase().includes("virtual")
+                            ? "bg-purple-600 text-white border-purple-700 hover:bg-purple-700 dark:bg-purple-700 dark:text-white"
+                            : "bg-blue-600 text-white border-blue-700 hover:bg-blue-700 dark:bg-blue-700 dark:text-white"
+                        )}
                       >
-                        {b.Booking_Type || "Inclinic_Booking"}
+                        <Building2 className="w-3.5 h-3.5 shrink-0" />
+                        {b.Booking_Type === "Inclinic_Booking" ? "In-Clinic Booking" : (b.Booking_Type || "In-Clinic Booking")}
                       </Badge>
                     </TableCell>
                     <TableCell>{b.ServiceName}</TableCell>
@@ -287,7 +308,21 @@ export default function Bookings() {
                       </Badge>
                     </TableCell>
 
-                    <TableCell>{b.isFollow_Up ?? "No"}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "font-semibold text-xs px-2.5 py-0.5 rounded-full border",
+                          (b.isFollow_Up === true || b.isFollow_Up === 1 || String(b.isFollow_Up).toLowerCase() === "true" || String(b.isFollow_Up) === "1" || b.isFollow_Up === "Yes")
+                            ? "bg-emerald-500/15 text-emerald-700 border-emerald-500/40 dark:text-emerald-300 dark:bg-emerald-950/50"
+                            : "bg-slate-500/10 text-slate-700 border-slate-400/40 dark:text-slate-300 dark:bg-slate-800/60"
+                        )}
+                      >
+                        {(b.isFollow_Up === true || b.isFollow_Up === 1 || String(b.isFollow_Up).toLowerCase() === "true" || String(b.isFollow_Up) === "1" || b.isFollow_Up === "Yes")
+                          ? "True"
+                          : "False"}
+                      </Badge>
+                    </TableCell>
 
                     <TableCell className="flex gap-2">
                       {!b._isOffline && (
@@ -297,7 +332,9 @@ export default function Bookings() {
                           onClick={() =>
                             navigate(`/edit-appointment/${b.id}`)
                           }
+                          className="gap-1.5 cursor-pointer"
                         >
+                          <Edit className="w-3.5 h-3.5" />
                           Edit
                         </Button>
                       )}
@@ -305,9 +342,11 @@ export default function Bookings() {
                       <Button
                         size="sm"
                         variant="destructive"
-                        onClick={() => deleteBooking(b.id)}
+                        onClick={() => setBookingToDelete(b)}
                         disabled={deletingId === b.id}
+                        className="gap-1.5 cursor-pointer"
                       >
+                        <Trash2 className="w-3.5 h-3.5" />
                         {deletingId === b.id ? "Deleting..." : "Delete"}
                       </Button>
                     </TableCell>
@@ -318,6 +357,49 @@ export default function Bookings() {
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={!!bookingToDelete}
+        onOpenChange={(open) => !open && setBookingToDelete(null)}
+      >
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-xl flex items-center gap-2 text-destructive">
+              <Trash2 className="w-5 h-5" />
+              Delete Booking
+            </DialogTitle>
+            <DialogDescription className="pt-2 text-sm text-muted-foreground">
+              Are you sure you want to delete the booking for{" "}
+              <span className="font-semibold text-foreground">
+                {bookingToDelete?.patientName}
+              </span>
+              {bookingToDelete?.ServiceName && (
+                <> ({bookingToDelete.ServiceName})</>
+              )}
+              ? This action will remove this appointment from the clinic schedule.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setBookingToDelete(null)}
+              disabled={deletingId !== null}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDeleteBooking}
+              disabled={deletingId !== null}
+              className="gap-1.5 cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4" />
+              {deletingId !== null ? "Deleting..." : "Yes, Delete Booking"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

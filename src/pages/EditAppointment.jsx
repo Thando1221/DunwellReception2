@@ -30,6 +30,17 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { API_BASE } from "@/lib/config";
+import {
+  updateAppointmentWithOfflineSync,
+  getCachedBookings,
+  getCachedPatients,
+  getCachedCatalogue,
+  getCachedNurses,
+  setCachedPatients,
+  setCachedCatalogue,
+  setCachedNurses,
+  isDeviceOnline,
+} from "@/lib/offlineSync";
 
 // ── AddServiceRow — unified Auto + Manual service picker ──────────────────────
 function AddServiceRow({ services, addedServices, onAdd }) {
@@ -158,6 +169,7 @@ export default function EditAppointment() {
   const [appointmentTime, setAppointmentTime] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [isStudent, setIsStudent] = useState(false);
+  const [isFollowUp, setIsFollowUp] = useState(false);
 
   // Unified added services list: { name, price, source: "auto"|"manual", discount? }
   const [addedServices, setAddedServices] = useState([]);
@@ -176,20 +188,35 @@ export default function EditAppointment() {
   useEffect(() => {
     const fetchDropdowns = async () => {
       try {
-        const [patientsRes, catalogueRes, nursesRes] = await Promise.all([
-          fetch(`${API_BASE}/patients`),
-          fetch(`${API_BASE}/catalogue`),
-          fetch(`${API_BASE}/nurses`),
-        ]);
-        if (!patientsRes.ok || !catalogueRes.ok || !nursesRes.ok)
-          throw new Error("Failed to fetch dropdown data");
-        setPatients(await patientsRes.json());
-        setServices(await catalogueRes.json());
-        setNurses(await nursesRes.json());
+        if (isDeviceOnline()) {
+          const [patientsRes, catalogueRes, nursesRes] = await Promise.all([
+            fetch(`${API_BASE}/patients`),
+            fetch(`${API_BASE}/catalogue`),
+            fetch(`${API_BASE}/nurses`),
+          ]);
+          if (patientsRes.ok && catalogueRes.ok && nursesRes.ok) {
+            const fetchedPatients = await patientsRes.json();
+            const fetchedCatalogue = await catalogueRes.json();
+            const fetchedNurses = await nursesRes.json();
+
+            setPatients(fetchedPatients);
+            setServices(fetchedCatalogue);
+            setNurses(fetchedNurses);
+
+            setCachedPatients(fetchedPatients);
+            setCachedCatalogue(fetchedCatalogue);
+            setCachedNurses(fetchedNurses);
+            return;
+          }
+        }
       } catch (err) {
-        console.error("❌ Error fetching dropdown data:", err);
-        toast.error("Error loading dropdown data");
+        console.warn("⚠️ Network error fetching dropdowns, using local cache:", err);
       }
+
+      // Offline / network failure fallback
+      setPatients(getCachedPatients());
+      setServices(getCachedCatalogue());
+      setNurses(getCachedNurses());
     };
     fetchDropdowns();
   }, []);
@@ -199,17 +226,33 @@ export default function EditAppointment() {
     if (!appointmentId) return;
     const loadBooking = async () => {
       try {
-        const res = await fetch(`${API_BASE}/bookings/${appointmentId}`);
-        if (!res.ok) throw new Error("Failed to fetch booking");
-        const data = await res.json();
-        setBookingRaw(data);
-        mapBookingToForm(data);
-        setLoading(false);
+        if (isDeviceOnline()) {
+          const res = await fetch(`${API_BASE}/bookings/${appointmentId}`);
+          if (res.ok) {
+            const data = await res.json();
+            setBookingRaw(data);
+            mapBookingToForm(data);
+            setLoading(false);
+            return;
+          }
+        }
       } catch (err) {
-        console.error("❌ Error loading booking:", err);
-        toast.error("Failed to load appointment");
-        setLoading(false);
+        console.warn("⚠️ Error loading booking from network, falling back to cache:", err);
       }
+
+      // Offline fallback: find booking from local cached bookings
+      const cached = getCachedBookings();
+      const found = cached.find(
+        (b) => String(b.id) === String(appointmentId) || String(b.AppointID) === String(appointmentId)
+      );
+
+      if (found) {
+        setBookingRaw(found);
+        mapBookingToForm(found);
+      } else {
+        toast.error("Appointment details not found in local cache");
+      }
+      setLoading(false);
     };
     loadBooking();
   }, [appointmentId]);
@@ -219,6 +262,15 @@ export default function EditAppointment() {
     if (data.UserID) setSelectedNurse(String(data.UserID));
     if (data.PaymentMethod) setPaymentMethod(data.PaymentMethod.toLowerCase());
     setIsStudent(Boolean(data.IsStudent));
+    setIsFollowUp(
+      Boolean(
+        data.isFollow_Up === true ||
+        data.isFollow_Up === 1 ||
+        data.isFollow_Up === "1" ||
+        String(data.isFollow_Up).toLowerCase() === "true" ||
+        data.isFollow_Up === "Yes"
+      )
+    );
 
     setMedicalAidName(data.MedicalAidName || "");
     setMedicalAidNumber(data.MedicalAidNumber || "");
@@ -316,27 +368,20 @@ export default function EditAppointment() {
       MainMember__IDNo: paymentMethod === "medical-aid" ? mainMemberIdNo : null,
       MedicalAid_option: paymentMethod === "medical-aid" ? medicalAidOption : null,
       Booking_Type: bookingRaw?.Booking_Type || "Inclinic_Booking",
-      isFollow_Up: bookingRaw?.isFollow_Up ?? false,
+      isFollow_Up: isFollowUp,
     };
 
     try {
-      const res = await fetch(`${API_BASE}/bookings/${appointmentId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        console.error("Update failed:", text);
-        throw new Error("Failed to update appointment");
+      const result = await updateAppointmentWithOfflineSync(appointmentId, payload);
+      if (result.offline) {
+        toast.info(result.message, { duration: 5000 });
+      } else {
+        toast.success(result.message);
       }
-
-      toast.success("Appointment updated!");
       navigate("/bookings");
     } catch (err) {
       console.error("❌ Error updating appointment:", err);
-      toast.error("Error updating appointment");
+      toast.error(err?.message || "Error updating appointment");
     }
   };
 
@@ -508,6 +553,37 @@ export default function EditAppointment() {
                 </Label>
               </div>
 
+              {/* Follow-Up Consultation Toggle */}
+              <div className="flex items-center justify-between p-4 rounded-lg border bg-muted/20">
+                <div className="space-y-0.5">
+                  <Label htmlFor="isFollowUp" className="text-sm font-semibold cursor-pointer">
+                    Follow-Up Consultation
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Mark whether this consultation is a follow-up visit for the patient
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span
+                    className={cn(
+                      "text-xs font-bold px-2.5 py-1 rounded-full border",
+                      isFollowUp
+                        ? "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700"
+                        : "bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700"
+                    )}
+                  >
+                    {isFollowUp ? "True" : "False"}
+                  </span>
+                  <input
+                    type="checkbox"
+                    id="isFollowUp"
+                    checked={isFollowUp}
+                    onChange={(e) => setIsFollowUp(e.target.checked)}
+                    className="h-5 w-5 rounded border-input text-primary focus:ring-primary cursor-pointer"
+                  />
+                </div>
+              </div>
+
               {/* Payment */}
               <div className="space-y-2">
                 <Label>Payment Method *</Label>
@@ -610,6 +686,19 @@ export default function EditAppointment() {
             <div className="flex justify-between">
               <span className="text-muted-foreground">Student:</span>
               <span>{isStudent ? "Yes" : "No"}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">Follow-Up:</span>
+              <span
+                className={cn(
+                  "text-xs font-bold px-2 py-0.5 rounded-full border",
+                  isFollowUp
+                    ? "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700"
+                    : "bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700"
+                )}
+              >
+                {isFollowUp ? "True" : "False"}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Payment:</span>

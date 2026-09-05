@@ -16,6 +16,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 import { API_BASE } from "@/lib/config";
+import {
+  updatePatientWithOfflineSync,
+  getCachedPatients,
+  isDeviceOnline,
+} from "@/lib/offlineSync";
 
 const EditPatient = () => {
   const { id } = useParams();
@@ -38,23 +43,42 @@ const EditPatient = () => {
   useEffect(() => {
     const fetchPatient = async () => {
       try {
-        const res = await axios.get(`${API_BASE}/patients/${id}`);
-
-        setFormData({
-          name: res.data.PatientName || "",
-          surname: res.data.PatientSurname || "",
-          email: res.data.Patient_Email || "",
-          phone: res.data.Patient_ContactNo || "",
-          dob: res.data.DOB ? res.data.DOB.split("T")[0] : "",
-          gender: res.data.Gender || "",
-          address: res.data.Address || "",
-        });
+        if (isDeviceOnline()) {
+          const res = await axios.get(`${API_BASE}/patients/${id}`);
+          setFormData({
+            name: res.data.PatientName || "",
+            surname: res.data.PatientSurname || "",
+            email: res.data.Patient_Email || "",
+            phone: res.data.Patient_ContactNo || "",
+            dob: res.data.DOB ? res.data.DOB.split("T")[0] : "",
+            gender: res.data.Gender || "",
+            address: res.data.Address || "",
+          });
+          setFetching(false);
+          return;
+        }
       } catch {
-        toast.error("Failed to load patient");
-        navigate("/patients");
-      } finally {
-        setFetching(false);
+        console.warn("Network fetch failed for patient, checking offline cache...");
       }
+
+      // Offline fallback
+      const cached = getCachedPatients();
+      const found = cached.find((p) => String(p.PatientID) === String(id));
+      if (found) {
+        setFormData({
+          name: found.PatientName || "",
+          surname: found.PatientSurname || "",
+          email: found.Patient_Email || "",
+          phone: found.Patient_ContactNo || "",
+          dob: found.DOB ? String(found.DOB).split("T")[0] : "",
+          gender: found.Gender || "",
+          address: found.Address || "",
+        });
+      } else {
+        toast.error("Patient details not found in local cache");
+        navigate("/patients");
+      }
+      setFetching(false);
     };
 
     fetchPatient();
@@ -72,7 +96,7 @@ const EditPatient = () => {
     try {
       setLoading(true);
 
-      await axios.put(`${API_BASE}/patients/${id}`, {
+      const result = await updatePatientWithOfflineSync(id!, {
         PatientName: formData.name,
         PatientSurname: formData.surname,
         Patient_Email: formData.email,
@@ -82,10 +106,14 @@ const EditPatient = () => {
         Address: formData.address,
       });
 
-      toast.success("Patient updated successfully");
+      if (result.offline) {
+        toast.info(result.message, { duration: 5000 });
+      } else {
+        toast.success(result.message);
+      }
       navigate("/patients");
     } catch (error: any) {
-      toast.error(error.response?.data?.message || "Update failed");
+      toast.error(error.response?.data?.message || error.message || "Update failed");
     } finally {
       setLoading(false);
     }
