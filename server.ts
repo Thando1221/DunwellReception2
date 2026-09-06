@@ -17,6 +17,7 @@ import attendanceRoutes from "./backend/routes/attendance.js";
 import financialRouter from "./backend/routes/financial.js";
 import payrollRouter from "./backend/routes/payroll.js";
 import registerRouter from "./backend/routes/register.js";
+import { getPool } from "./backend/db.js";
 
 dotenv.config();
 
@@ -64,8 +65,13 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, "0.0.0.0", async () => {
     console.log(`Dunwell Clinic server running on http://0.0.0.0:${PORT}`);
+    try {
+      await getPool();
+    } catch (err: any) {
+      console.warn("Initial DB connection warning:", err.message);
+    }
   });
 }
 

@@ -18,8 +18,8 @@ router.post("/login", async (req, res) => {
 
   try {
     const users = await query(
-      "SELECT * FROM Users WHERE UserName = @p0",
-      [username]
+      "SELECT * FROM Users WHERE LOWER(UserName) = LOWER(@p0)",
+      [username.trim()]
     );
 
     const user = users[0];
@@ -41,16 +41,20 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    if (user.UserRole?.trim() !== "R") {
+    const rawRole = (user.UserRole || "").trim().toUpperCase();
+    const allowedRoles = ["R", "A", "RECEPTIONIST", "ADMIN", "E", "IT"];
+    if (!allowedRoles.includes(rawRole)) {
       return res
         .status(403)
-        .json({ message: "Access denied: not authorized" });
+        .json({ message: "Access denied: role not authorized" });
     }
+
+    const normalizedRole = rawRole === "A" || rawRole === "ADMIN" || rawRole === "IT" ? "Admin" : "Receptionist";
 
     const token = jwt.sign(
       {
         id: user.UserID,
-        role: user.UserRole?.trim(),
+        role: normalizedRole,
         name: user.Name,
       },
       process.env.JWT_SECRET || "dunwell-reception-jwt-secret-key-2025",
@@ -65,7 +69,7 @@ router.post("/login", async (req, res) => {
         name: user.Name,
         surname: user.Surname,
         email: user.Email,
-        role: user.UserRole?.trim(),
+        role: normalizedRole,
       },
     });
   } catch (err) {

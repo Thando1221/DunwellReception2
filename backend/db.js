@@ -1,6 +1,15 @@
 import sql from "mssql";
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load .env from root or backend directory
 dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 const config = {
   user: process.env.DB_USER,
@@ -11,14 +20,16 @@ const config = {
   options: {
     encrypt: process.env.DB_ENCRYPT === "false" ? false : true,
     trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE === "true" ? true : false,
+    enableArithAbort: true,
   },
   pool: {
     max: 10,
     min: 0,
     idleTimeoutMillis: 30000,
   },
-  connectionTimeout: 2000,
-  requestTimeout: 2000,
+  // Set sufficient connection and request timeouts for Azure SQL cloud latency (30s)
+  connectionTimeout: parseInt(process.env.DB_CONNECTION_TIMEOUT || "30000", 10),
+  requestTimeout: parseInt(process.env.DB_REQUEST_TIMEOUT || "30000", 10),
 };
 
 // ==========================================
@@ -317,7 +328,7 @@ function executeMockQuery(queryString, paramMap = {}) {
 
   // 1. AUTH / USER QUERIES
   if (qUpper.includes("FROM USERS")) {
-    if (qUpper.includes("WHERE USERNAME =")) {
+    if (qUpper.includes("WHERE USERNAME =") || qUpper.includes("LOWER(USERNAME)")) {
       const usernameParam = paramMap["p0"] ?? paramMap["UserName"] ?? "";
       const user = mockData.users.find(
         (u) => u.UserName.toLowerCase() === String(usernameParam).trim().toLowerCase()
@@ -767,24 +778,56 @@ const mockPool = {
   connected: true,
 };
 
-// Lazy connection: Try Azure SQL if DB_SERVER is set; fallback to in-memory mock seamlessly
+let connectingPromise = null;
+let lastFailureTime = 0;
+const RETRY_COOLDOWN_MS = 10000; // 10s cooldown between failed connection attempts
+
+// Lazy connection: Connects to Azure SQL with automatic fallback to mock store if temporarily unavailable
 export async function getPool() {
   if (useMock) {
     return mockPool;
   }
 
-  if (pool) return pool;
-
-  try {
-    pool = await sql.connect(config);
-    console.log("✅ Azure SQL connected successfully");
+  if (pool && pool.connected) {
     return pool;
-  } catch (err) {
-    console.warn("⚠️ Azure SQL connection failed or unreachable (" + err.message + "). Activating in-memory mock database.");
-    useMock = true;
-    pool = null;
+  }
+
+  // Prevent spamming connection attempts if it just failed
+  const now = Date.now();
+  if (now - lastFailureTime < RETRY_COOLDOWN_MS && !pool) {
     return mockPool;
   }
+
+  if (connectingPromise) {
+    return connectingPromise;
+  }
+
+  connectingPromise = (async () => {
+    try {
+      if (pool) {
+        try {
+          await pool.close();
+        } catch {
+          // ignore close error
+        }
+        pool = null;
+      }
+
+      console.log(`Connecting to Azure SQL server (${config.server}:${config.port}, Database: ${config.database})...`);
+      pool = await sql.connect(config);
+      console.log(`✅ Azure SQL connected successfully to ${config.server} (Database: ${config.database})`);
+      connectingPromise = null;
+      return pool;
+    } catch (err) {
+      lastFailureTime = Date.now();
+      connectingPromise = null;
+      console.warn(`⚠️ Azure SQL connection attempt failed (${err.message}). Using in-memory store as fallback until next retry.`);
+      pool = null;
+      return mockPool;
+    }
+  })();
+
+  return connectingPromise;
 }
 
 // Query helper used across routes
@@ -799,7 +842,7 @@ export async function query(q, params = []) {
 
   try {
     const p = await getPool();
-    if (useMock) {
+    if (!p || p === mockPool || !p.connected) {
       const paramMap = {};
       params.forEach((val, i) => {
         paramMap[`p${i}`] = val;
@@ -815,8 +858,7 @@ export async function query(q, params = []) {
     const result = await request.query(q);
     return result.recordset;
   } catch (err) {
-    console.warn("⚠️ Query execution failed on SQL (" + err.message + "). Falling back to in-memory store.");
-    useMock = true;
+    console.warn("⚠️ Query execution failed on SQL (" + err.message + "). Falling back to in-memory store for this query.");
     const paramMap = {};
     params.forEach((val, i) => {
       paramMap[`p${i}`] = val;
